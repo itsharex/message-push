@@ -57,6 +57,11 @@ func (c FailureRuleController) CreateFailureRule(ctx *gin.Context, helper interf
 		rule.Status = 1
 	}
 
+	// 确保 ActionConfig 是有效的 JSON（MySQL JSON 列不接受空字符串）
+	if rule.ActionConfig == "" {
+		rule.ActionConfig = "{}"
+	}
+
 	if err := ruleDAO.Create(rule); err != nil {
 		controller.ErrorResponse(ctx, 500, "failed to create rule: "+err.Error())
 		return
@@ -183,6 +188,11 @@ func (c FailureRuleController) UpdateFailureRule(ctx *gin.Context, helper interf
 	}
 	if req.Status != nil {
 		rule.Status = int8(*req.Status)
+	}
+
+	// 确保 ActionConfig 是有效的 JSON（MySQL JSON 列不接受空字符串）
+	if rule.ActionConfig == "" {
+		rule.ActionConfig = "{}"
 	}
 
 	if err := ruleDAO.Update(rule); err != nil {
