@@ -151,8 +151,12 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 	migrations.SetExternalDB(testDB)
 	defer migrations.ClearExternalDB()
 
-	// 执行 goose 迁移
-	if err := migration.RunGooseMigrations(sqlDB, nil); err != nil {
+	// 执行 goose 迁移，使用用户选择的数据库驱动作为方言
+	dialect := req.Database.Driver
+	if dialect == "" {
+		dialect = "mysql" // 默认 MySQL
+	}
+	if err := migration.RunGooseMigrations(sqlDB, dialect, nil); err != nil {
 		ic.Error(c, constants.CodeInternalError, "数据库迁移失败: "+err.Error())
 		return
 	}

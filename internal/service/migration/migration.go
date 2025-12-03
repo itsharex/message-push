@@ -34,9 +34,12 @@ func (receiver *Migration) Run() error {
 		return fmt.Errorf("[db migration] 获取 sql.DB 失败: %w", err)
 	}
 
+	// 从配置读取数据库方言
+	dialect := receiver.Helper.GetConfig().GetString("database.driver", "mysql")
+
 	// 执行 goose 迁移，传入 GORM DB 供 initial_schema 使用
 	logger := &gsrLoggerAdapter{receiver.Helper.GetLogger()}
-	if err := RunGooseMigrationsWithGorm(sqlDB, gormDB, logger); err != nil {
+	if err := RunGooseMigrationsWithGorm(sqlDB, gormDB, dialect, logger); err != nil {
 		return fmt.Errorf("[db migration] goose 迁移失败: %w", err)
 	}
 
@@ -68,13 +71,15 @@ func (l *gsrLoggerAdapter) Error(msg string) { l.logger.Error(msg) }
 
 // RunGooseMigrations 执行 goose 版本化迁移（简单版本，供安装控制器使用）
 // 安装控制器需要先调用 migrations.SetExternalDB() 设置 GORM 连接
-func RunGooseMigrations(db *sql.DB, logger Logger) error {
-	return RunGooseMigrationsWithGorm(db, nil, logger)
+// dialect: 数据库方言，如 mysql, postgres, sqlite3
+func RunGooseMigrations(db *sql.DB, dialect string, logger Logger) error {
+	return RunGooseMigrationsWithGorm(db, nil, dialect, logger)
 }
 
 // RunGooseMigrationsWithGorm 执行 goose 版本化迁移（完整版本）
 // gormDB 用于 initial_schema 迁移中的 AutoMigrate
-func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, logger Logger) error {
+// dialect: 数据库方言，如 mysql, postgres, sqlite3
+func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, dialect string, logger Logger) error {
 	if logger == nil {
 		logger = &simpleLogger{}
 	}
@@ -85,9 +90,10 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, logger Logger) erro
 		defer migrations.ClearExternalDB()
 	}
 
-	// 设置 goose 方言为 MySQL
-	if err := goose.SetDialect("mysql"); err != nil {
-		return fmt.Errorf("设置 goose 方言失败: %w", err)
+	// 映射数据库驱动到 goose 方言
+	gooseDialect := mapDriverToGooseDialect(dialect)
+	if err := goose.SetDialect(gooseDialect); err != nil {
+		return fmt.Errorf("设置 goose 方言失败 (%s -> %s): %w", dialect, gooseDialect, err)
 	}
 
 	// 获取当前版本
@@ -122,6 +128,35 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, logger Logger) erro
 	}
 
 	return nil
+}
+
+// mapDriverToGooseDialect 将数据库驱动名称映射为 goose 方言
+// | Goose 方言      | 驱动名        |
+// | --------------- | ------------ |
+// | postgres        | postgres     |
+// | mysql           | mysql        |
+// | mysql           | mariadb      |
+// | sqlite3         | sqlite3       |
+// | sqlite3         | sqlite3      |
+// | mssql           | mssql        |
+// | mssql           | sqlserver    |
+func mapDriverToGooseDialect(driver string) string {
+	switch driver {
+	case "postgres", "postgresql":
+		return "postgres"
+	case "mysql", "mariadb":
+		return "mysql"
+	case "sqlite", "sqlite3":
+		return "sqlite3"
+	case "mssql", "sqlserver":
+		return "mssql"
+	default:
+		// 默认返回 mysql
+		if driver == "" {
+			return "mysql"
+		}
+		return driver
+	}
 }
 
 // Stop Migration 服务不需要停止操作，空实现
